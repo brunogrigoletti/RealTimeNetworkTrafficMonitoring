@@ -1,14 +1,14 @@
-import pcapy
+import libpcap
 import struct
 import socket
 
 def mac_addr(bytes_addr):
     return ':'.join('%02x' % b for b in bytes_addr)
 
-def packet_handler(header, data):
+def packet_handler(ts, pkt, d):
     print("="*40)
     # Ethernet header
-    eth_header = data[:14]
+    eth_header = pkt[:14]
     eth = struct.unpack('!6s6sH', eth_header)
     print(f"Ethernet Header:")
     print(f"  Dest MAC: {mac_addr(eth[0])}")
@@ -16,8 +16,8 @@ def packet_handler(header, data):
     print(f"  Protocol: {eth[2]:#06x}")
 
     # IP header (if present)
-    if eth[2] == 0x0800:  # IPv4
-        ip_header = data[14:34]
+    if eth[2] == 0x0800 and len(pkt) >= 34:  # IPv4
+        ip_header = pkt[14:34]
         iph = struct.unpack('!BBHHHBBH4s4s', ip_header)
         version_ihl = iph[0]
         version = version_ihl >> 4
@@ -31,14 +31,14 @@ def packet_handler(header, data):
         print(f"  Dest IP: {socket.inet_ntoa(iph[9])}")
 
         # TCP or UDP header
-        if iph[6] == 6:  # TCP
-            tcp_header = data[14+ihl:14+ihl+20]
+        if iph[6] == 6 and len(pkt) >= 14+ihl+20:  # TCP
+            tcp_header = pkt[14+ihl:14+ihl+20]
             tcph = struct.unpack('!HHLLBBHHH', tcp_header)
             print(f"TCP Header:")
             print(f"  Src Port: {tcph[0]}")
             print(f"  Dest Port: {tcph[1]}")
-        elif iph[6] == 17:  # UDP
-            udp_header = data[14+ihl:14+ihl+8]
+        elif iph[6] == 17 and len(pkt) >= 14+ihl+8:  # UDP
+            udp_header = pkt[14+ihl:14+ihl+8]
             udph = struct.unpack('!HHHH', udp_header)
             print(f"UDP Header:")
             print(f"  Src Port: {udph[0]}")
@@ -47,7 +47,7 @@ def packet_handler(header, data):
 
 def main():
     # Lista interfaces disponíveis
-    devices = pcapy.findalldevs()
+    devices = list(libpcap.findalldevs())
     print("Interfaces disponíveis:")
     for i, dev in enumerate(devices):
         print(f"{i}: {dev}")
@@ -55,10 +55,10 @@ def main():
     dev = devices[idx]
 
     # Abre a interface para captura
-    cap = pcapy.open_live(dev, 65536, 1, 0)
-    print(f"Capturando na interface: {dev}")
-    while True:
-        cap.dispatch(1, packet_handler)
+    with libpcap.pcap(dev, snaplen=65536, promisc=True, to_ms=100) as cap:
+        print(f"Capturando na interface: {dev}")
+        for ts, pkt in cap:
+            packet_handler(ts, pkt, None)
 
 if __name__ == "__main__":
     main()
