@@ -1,13 +1,36 @@
 import datetime
 import struct
 import threading
+import os
 from winpcapy import WinPcapUtils, WinPcapDevices
+from openpyxl import Workbook, load_workbook
+
+def write_excel_log(filename, header, row):
+    file_exists = os.path.exists(filename)
+    if file_exists:
+        wb = load_workbook(filename)
+        ws = wb.active
+    else:
+        wb = Workbook()
+        ws = wb.active
+        ws.append(header)
+    ws.append(row)
+    wb.save(filename)
 
 def mac_addr(bytes_addr):
     # Converte endereço MAC em bytes para String legível
     return ':'.join('%02x' % b for b in bytes_addr)
 
+# Inicialização dos contadores de pacotes
+eth_count = 0
+ip4_count = 0
+ip6_count = 0
+tcp_count = 0
+udp_count = 0
+
 def packet_callback(win_pcap, param, header, pkt_data):
+    global eth_count, ip4_count, ip6_count, tcp_count, udp_count
+
     # Obtém o timestamp do header
     ts_sec = header.contents.ts.tv_sec
     ts_usec = header.contents.ts.tv_usec
@@ -24,6 +47,7 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # 'H': 2 bytes para o campo "EtherType" (protocolo)
     # '!': ordem de bytes network (big-endian)
     eth = struct.unpack('!6s6sH', eth_header)
+    eth_count += 1
 
     # Dicionário EtherType para nome do protocolo
     ethertype_names = {
@@ -34,14 +58,13 @@ def packet_callback(win_pcap, param, header, pkt_data):
     proto_hex = eth[2]
     proto_name = ethertype_names.get(proto_hex, "Unknown")
 
-    print("=" * 50)
-
-    print("\nEthernet Header:")
-    print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
-    print(f"  Source MAC: {mac_addr(eth[1])}")
-    print(f"  Destination MAC: {mac_addr(eth[0])}")
-    print(f"  Protocol: {eth[2]:#06x} - {proto_name}")
-    print(f"  Length: {header.contents.len} bytes")
+    # Imprime o cabeçalho Ethernet e escreve no log do Excel
+    # print_ethernet_header(timestamp, eth, proto_name, header.contents.len, eth_count)
+    write_excel_log(
+        "camada2.xlsx",
+        ['Timestamp', 'Source MAC', 'Destination MAC', 'Protocol', 'Protocol Name', 'Length'],
+        [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), mac_addr(eth[1]), mac_addr(eth[0]), f"{eth[2]:#06x}", proto_name, header.contents.len]
+    )
 
     # Extrai e processa o cabeçalho IPv4 do pacote capturado
     ip4_header = pkt_data[14:34]
@@ -61,14 +84,8 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # '4s': 4 bytes para o IP de origem
     # '4s': 4 bytes para o IP de destino
     ipv4 = struct.unpack('!BBHHHBBH4s4s', ip4_header)
+    ip4_count += 1
  
-    print("\nIPv4 Header:")
-    print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
-    print(f"  Source IP: {'.'.join(map(str, ipv4[8]))}")
-    print(f"  Destination IP: {'.'.join(map(str, ipv4[9]))}")
-    print(f"  Protocol ID: {ipv4[6]}")
-    print(f"  Length: {header.contents.len} bytes")
-
     # Extrai e processa o cabeçalho IPv6 do pacote capturado
     ip6_header = pkt_data[14:54]
     if len(ip6_header) < 40:
@@ -83,16 +100,26 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # '16s': 16 bytes para o IP de origem
     # '16s': 16 bytes para o IP de destino
     ipv6 = struct.unpack('!IHBB16s16s', ip6_header)
+    ip6_count += 1
 
     src_ip = ':'.join(f"{ipv6[4][i]<<8 | ipv6[4][i+1]:x}" for i in range(0,16,2))
     dst_ip = ':'.join(f"{ipv6[5][i]<<8 | ipv6[5][i+1]:x}" for i in range(0,16,2))    
 
-    print("\nIPv6 Header:")
-    print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
-    print(f"  Source IP: {src_ip}")
-    print(f"  Destination IP: {dst_ip}")
-    print(f"  Protocol ID: {ipv6[2]}")
-    print(f"  Length: {header.contents.len} bytes")
+    # Imprime o cabeçalho IP e escreve no log do Excel
+    # print_ipv4_header(timestamp, ipv4, header.contents.len, ip4_count)
+    # print_ipv6_header(timestamp, src_ip, dst_ip, ipv6, header.contents.len, ip6_count)
+    if proto_name == "IPv4":
+        write_excel_log(
+            "camada3.xlsx",
+            ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, '.'.join(map(str, ipv4[8])), '.'.join(map(str, ipv4[9])), ipv4[6], header.contents.len]
+        )
+    elif proto_name == "IPv6":
+        write_excel_log(
+            "camada3.xlsx",
+            ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_ip, dst_ip, ipv6[2], header.contents.len]
+    )
 
     # Extrai e processa o cabeçalho de transporte do pacote capturado
     transport_header = None
@@ -112,6 +139,7 @@ def packet_callback(win_pcap, param, header, pkt_data):
         # 'H': 2 bytes para Urgent Pointer
         # 'H': 2 bytes para Opções (se houver)
         tcp = struct.unpack('!HHLLBBHHH', transport_header)
+        tcp_count += 1
     # UDP
     elif ipv6[2] == 17:
         transport_header = pkt_data[34:42]
@@ -123,16 +151,83 @@ def packet_callback(win_pcap, param, header, pkt_data):
         # 'H': 2 bytes para Comprimento
         # 'H': 2 bytes para Checksum
         udp = struct.unpack('!HHHH', transport_header) 
+        udp_count += 1
 
+    if transport_header and ipv4[6] == 6:
+        proto = 'TCP'
+        src_ip_str = '.'.join(map(str, ipv4[8]))
+        src_port = tcp[0]
+        dst_ip_str = '.'.join(map(str, ipv4[9]))
+        dst_port = tcp[1]
+        pkt_count = tcp_count
+    elif transport_header and ipv6[2] == 17:
+        proto = 'UDP'
+        src_ip_str = src_ip
+        src_port = udp[0]
+        dst_ip_str = dst_ip
+        dst_port = udp[1]
+        pkt_count = udp_count
+    else:
+        proto = 'Unknown'
+        src_ip_str = 'N/A'
+        src_port = 'N/A'
+        dst_ip_str = 'N/A'
+        dst_port = 'N/A'
+        pkt_count = 'N/A'
+    
+    # Imprime o cabeçalho UDP/TCP e escreve no log do Excel
+    # print_transport_header(timestamp,proto,src_ip_str,src_port,dst_ip_str,dst_port,header.contents.len,pkt_count)
+    if transport_header and proto == 'TCP':
+        write_excel_log(
+            "camada4.xlsx",
+            ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
+        )
+    elif transport_header and proto == 'UDP':
+        write_excel_log(
+            "camada4.xlsx",
+            ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
+        )
+    
+def print_ethernet_header(timestamp, eth, proto_name, header_len, eth_count):
+    print("=" * 50)
+    print("\nEthernet Header:")
+    print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
+    print(f"  Source MAC: {mac_addr(eth[1])}")
+    print(f"  Destination MAC: {mac_addr(eth[0])}")
+    print(f"  Protocol: {eth[2]:#06x} - {proto_name}")
+    print(f"  Length: {header_len} bytes")
+    print(f"  Packet Count: {eth_count}")
+
+def print_ipv4_header(timestamp, ipv4, header_len, ip4_count):
+    print("\nIPv4 Header:")
+    print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
+    print(f"  Source IP: {'.'.join(map(str, ipv4[8]))}")
+    print(f"  Destination IP: {'.'.join(map(str, ipv4[9]))}")
+    print(f"  Protocol ID: {ipv4[6]}")
+    print(f"  Length: {header_len} bytes")
+    print(f"  Packet Count: {ip4_count}")
+
+def print_ipv6_header(timestamp, src_ip, dst_ip, ipv6, header_len, ip6_count):
+    print("\nIPv6 Header:")
+    print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
+    print(f"  Source IP: {src_ip}")
+    print(f"  Destination IP: {dst_ip}")
+    print(f"  Protocol ID: {ipv6[2]}")
+    print(f"  Length: {header_len} bytes")
+    print(f"  Packet Count: {ip6_count}")
+
+def print_transport_header(timestamp, proto, src_ip, src_port, dst_ip, dst_port, header_len, count):
     print("\nTransport Header:")
     print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
-    print(f"  Protocol: {'TCP' if ipv4[6] == 6 else 'UDP' if ipv6[2] == 17 else 'Unknown'}")
-    print(f"  Source IP: {'.'.join(map(str, ipv4[8])) if transport_header and ipv4[6] == 6 else src_ip if transport_header and ipv6[2] == 17 else 'N/A'}")
-    print(f"  Source Port: {tcp[0] if transport_header and ipv4[6] == 6 else udp[0] if transport_header and ipv6[2] == 17 else 'N/A'}")
-    print(f"  Destination IP: {'.'.join(map(str, ipv4[9])) if transport_header and ipv4[6] == 6 else dst_ip if transport_header and ipv6[2] == 17 else 'N/A'}")
-    print(f"  Destination Port: {tcp[1] if transport_header and ipv4[6] == 6 else udp[1] if transport_header and ipv6[2] == 17 else 'N/A'}")
-    print(f"  Length: {header.contents.len} bytes")
-
+    print(f"  Protocol: {proto}")
+    print(f"  Source IP: {src_ip}")
+    print(f"  Source Port: {src_port}")
+    print(f"  Destination IP: {dst_ip}")
+    print(f"  Destination Port: {dst_port}")
+    print(f"  Length: {header_len} bytes")
+    print(f"  Packet Count: {count}")
     print("=" * 50)
 
 def list_interfaces():
