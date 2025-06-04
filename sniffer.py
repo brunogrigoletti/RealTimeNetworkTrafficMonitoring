@@ -8,6 +8,7 @@ from winpcapy import WinPcapUtils, WinPcapDevices
 from openpyxl import Workbook, load_workbook
 
 def write_excel_log(filename, header, row):
+    # Criação, construção e registro dos arquivos .xlsx
     file_exists = os.path.exists(filename) and os.path.getsize(filename) > 0
     if file_exists:
         wb = load_workbook(filename)
@@ -249,9 +250,9 @@ def list_interfaces():
 stop_event = threading.Event()
 
 def capture_packets(interface):
+    # Captura dos pacotes na interface escolhida
     try:
-        while not stop_event.is_set():
-            WinPcapUtils.capture_on(interface, packet_callback)
+        WinPcapUtils.capture_on(interface, packet_callback)
     except Exception as e:
         print(f"Capture error: {e}")
 
@@ -268,7 +269,7 @@ def loading_spinner(stop_event):
 
 def main():
     interface = list_interfaces()
-    print(f"\nSelected interface: '{interface}'")
+    print(f"\nSelected interface: '{interface}'\n")
     capture_thread = None
     spinner_thread = None
 
@@ -286,15 +287,16 @@ def main():
         elif cmd == "stop":
             if capture_thread and capture_thread.is_alive():
                 stop_event.set()
-                capture_thread.join()
                 spinner_thread.join()
                 print("Capture stopped!")
+                print("=" * 50)
+                print(f"Summary:")
                 print(f"Ethernet frames: {eth_count}")
                 print(f"IPv4 packets:    {ip4_count}")
                 print(f"IPv6 packets:    {ip6_count}")
                 print(f"TCP segments:    {tcp_count}")
                 print(f"UDP datagrams:   {udp_count}")
-                print("Stopping...")
+                print("=" * 50)
                 break
             else:
                 print("No capture is running!")
