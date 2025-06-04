@@ -1,12 +1,14 @@
 import datetime
 import struct
+import sys
 import threading
 import os
+import time
 from winpcapy import WinPcapUtils, WinPcapDevices
 from openpyxl import Workbook, load_workbook
 
 def write_excel_log(filename, header, row):
-    file_exists = os.path.exists(filename)
+    file_exists = os.path.exists(filename) and os.path.getsize(filename) > 0
     if file_exists:
         wb = load_workbook(filename)
         ws = wb.active
@@ -61,7 +63,7 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # Imprime o cabeçalho Ethernet e escreve no log do Excel
     # print_ethernet_header(timestamp, eth, proto_name, header.contents.len, eth_count)
     write_excel_log(
-        "camada2.xlsx",
+        "layer2.xlsx",
         ['Timestamp', 'Source MAC', 'Destination MAC', 'Protocol', 'Protocol Name', 'Length'],
         [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), mac_addr(eth[1]), mac_addr(eth[0]), f"{eth[2]:#06x}", proto_name, header.contents.len]
     )
@@ -110,13 +112,13 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # print_ipv6_header(timestamp, src_ip, dst_ip, ipv6, header.contents.len, ip6_count)
     if proto_name == "IPv4":
         write_excel_log(
-            "camada3.xlsx",
+            "layer3.xlsx",
             ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, '.'.join(map(str, ipv4[8])), '.'.join(map(str, ipv4[9])), ipv4[6], header.contents.len]
         )
     elif proto_name == "IPv6":
         write_excel_log(
-            "camada3.xlsx",
+            "layer3.xlsx",
             ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_ip, dst_ip, ipv6[2], header.contents.len]
     )
@@ -179,13 +181,13 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # print_transport_header(timestamp,proto,src_ip_str,src_port,dst_ip_str,dst_port,header.contents.len,pkt_count)
     if transport_header and proto == 'TCP':
         write_excel_log(
-            "camada4.xlsx",
+            "layer4.xlsx",
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
         )
     elif transport_header and proto == 'UDP':
         write_excel_log(
-            "camada4.xlsx",
+            "layer4.xlsx",
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
         )
@@ -241,7 +243,7 @@ def list_interfaces():
             device_list.append(desc)
 
         # Escolha da interface pelo índice
-        idx = int(input("Type the interface number to start capturing: "))
+        idx = int(input("\nType the interface number to start capturing: "))
         return device_list[idx]
 
 stop_event = threading.Event()
@@ -253,34 +255,49 @@ def capture_packets(interface):
     except Exception as e:
         print(f"Capture error: {e}")
 
+def loading_spinner(stop_event):
+    spinner = ['|', '/', '-', '\\']
+    idx = 0
+    while not stop_event.is_set():
+        sys.stdout.write(f"\rCapturing... {spinner[idx % len(spinner)]}")
+        sys.stdout.flush()
+        idx += 1
+        time.sleep(0.1)
+    sys.stdout.write('\r' + ' ' * 40 + '\r\n')
+    sys.stdout.flush()
+
 def main():
     interface = list_interfaces()
-    print(f"Selected interface: '{interface}'")
+    print(f"\nSelected interface: '{interface}'")
     capture_thread = None
+    spinner_thread = None
 
     while True:
-        cmd = input("Type 'cat' to start capturing, 'stop' to stop, or 'exit' to exit: ").strip().lower()
+        cmd = input("Type 'cat' to start capturing or 'stop' to stop: ").strip().lower()
         if cmd == "cat":
             if capture_thread and capture_thread.is_alive():
                 print("Capture is already running!")
             else:
                 stop_event.clear()
                 capture_thread = threading.Thread(target=capture_packets, args=(interface,), daemon=True)
+                spinner_thread = threading.Thread(target=loading_spinner, args=(stop_event,), daemon=True)
                 capture_thread.start()
-                print("Capture started!")
+                spinner_thread.start()  
         elif cmd == "stop":
             if capture_thread and capture_thread.is_alive():
                 stop_event.set()
                 capture_thread.join()
+                spinner_thread.join()
                 print("Capture stopped!")
+                print(f"Ethernet frames: {eth_count}")
+                print(f"IPv4 packets:    {ip4_count}")
+                print(f"IPv6 packets:    {ip6_count}")
+                print(f"TCP segments:    {tcp_count}")
+                print(f"UDP datagrams:   {udp_count}")
+                print("Stopping...")
+                break
             else:
                 print("No capture is running!")
-        elif cmd == "exit":
-            if capture_thread and capture_thread.is_alive():
-                stop_event.set()
-                capture_thread.join()
-            print("Exiting...")
-            break
         else:
             print("Unknown command!")
 
