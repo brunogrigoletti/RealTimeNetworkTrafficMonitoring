@@ -1,0 +1,253 @@
+\documentclass[12pt]{article}
+\usepackage[a4paper, total={6in, 9in}]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{csquotes}
+\usepackage{lipsum}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{tcolorbox}
+\usepackage{seqsplit}
+
+\renewcommand{\figurename}{Figura}
+\hypersetup{colorlinks=true, urlcolor=blue}
+
+\tcbuselibrary{listingsutf8}
+\newtcblisting{terminal}{
+    listing only,
+    listing options={
+        basicstyle=\ttfamily\color{white}\small,
+        backgroundcolor=\color{black},
+        keywordstyle=\color{cyan},
+        commentstyle=\color{green},
+        identifierstyle=\color{white},
+        language=bash,
+        breaklines=true,
+        showstringspaces=false,
+        numbers=none,
+        deletekeywords={do},
+    },
+    colframe=black,
+    colback=black,
+    sharp corners,
+    boxsep=1mm,
+    left=2mm,
+    right=2mm,
+    top=1mm,
+    bottom=1mm,
+}
+
+\lstdefinestyle{vscode}{
+    language=Python,
+    extendedchars=true,
+    inputencoding=ansinew,
+    tabsize=4,
+    showstringspaces=false,
+    numbers=left,
+    firstnumber=1,
+    commentstyle=\color{gray},        
+    keywordstyle=\color{blue},        
+    stringstyle=\color{orange},
+    rulecolor=\color{black},
+    basicstyle=\small\ttfamily,
+    breaklines=true,
+    numberstyle=\tiny,
+    aboveskip=1em,
+    belowskip=1em,
+}
+
+\graphicspath{{./images/}}
+
+\title{\textbf{Monitor de Tráfego de Rede em Tempo Real}}
+\date{Laboratório de Redes de Computadores}
+\author{Bruno Laitano e Bianca Alves}
+
+\begin{document}
+
+\maketitle
+
+\section{Introdução}
+O presente relatório detalha a implementação de uma ferramenta de monitoramento de tráfego de rede em tempo real. O sistema desenvolvido é capaz de capturar, interpretar e classificar pacotes de rede, além de fornecer uma interface de usuário simples para que seja possível visualizar as estatísticas do tráfego. Além disso, cada captura incrementa arquivos \texttt{.xlsx}, os quais mantêm registrado um histórico de cada tipo de pacote recebido.
+
+\quad Os logs da camada de Enlace (\texttt{layer2.xlsx}) registram a data e a hora em que o quadro foi capturado; o endereço MAC de origem e o endereço MAC de destino; o protocolo que o \emph{frame} carrega no formato hexadecimal; e, por fim, o tamanho total do quadro em \emph{bytes}. No caso da camada de Rede (\texttt{layer3.xlsx}), registra-se a data e a hora em que o pacote foi capturado; o nome do protocolo (IPv4 ou IPv6); o endereço IP de origem e o endereço IP de destino; o identificador do protocolo carregado no pacote; e, finalmente, o tamanho total do pacote em \emph{bytes}. Ainda, no caso da camada de Transporte (\texttt{layer4.xlsx}), são registrados a data e a hora em que o pacote foi capturado; o nome do protocolo (TCP ou UDP); o endereço IP de origem; a porta de origem; o endereço IP de destino; a porta de destino; e, enfim, o tamanho total do pacote em \emph{bytes}.
+
+\quad Finalmente, a escolha pelo uso do pacote \texttt{winpcapy} neste projeto se deve à sua capacidade de fornecer acesso direto e eficiente à captura de pacotes de rede em sistemas \emph{Windows}, aproveitando a biblioteca \emph{WinPcap}. O \texttt{winpcapy} permite a interceptação de pacotes em baixo nível, possibilitando a análise detalhada dos protocolos das camadas 2, 3 e 4 da pilha TCP/IP, o que é fundamental para a nossa aplicação de monitoramento de tráfego de rede em tempo real.
+
+\section{Extração}
+A identificação do cabeçalho de cada tipo de pacote ou quadro é realizada com base na operação \texttt{unpack}, oferecida pelo pacote \texttt{struct}. Este módulo é utilizado para converter uma sequência de \emph{bytes} em campos de dados estruturados, conforme o formato especificado. \emph{Strings} de formato compacto descrevem as conversões pretendidas de/para valores Python.
+
+\subsection{\emph{Ethernet}}
+Inicialmente, é preciso extrair e processar o cabeçalho \emph{Ethernet} do pacote capturado. Isso é realizado identificando-se os primeiros 14 bytes do pacote.
+
+\begin{lstlisting}[style=vscode]
+eth_header = pkt_data[:14]
+eth = struct.unpack('!6s6sH', eth_header)
+\end{lstlisting}
+
+\quad A \emph{String} \texttt{!6s6sH} referencia os seguintes valores neste universo de 14 \emph{bytes}:
+
+\begin{itemize}
+    \item \texttt{!}: ordem de \emph{bytes} de rede;
+    \item \texttt{6s}: 6 \emph{bytes} para o endereço MAC de destino;
+    \item \texttt{6s}: 6 \emph{bytes} para o endereço MAC de origem;
+    \item \texttt{H}: 2 \emph{bytes} para o campo EtherType (identifica o protocolo da camada superior).
+\end{itemize}
+
+\subsection{IPv4}
+Na sequência, extraímos e processamos o cabeçalho IPv4, correspondido entre os \emph{bytes} 14 e 34 do pacote. O cabeçalho IPv4 padrão possui 20 \emph{bytes} e inicia logo após o cabeçalho \emph{Ethernet}.
+
+\begin{lstlisting}[style=vscode]
+ip4_header = pkt_data[14:34]
+ipv4 = struct.unpack('!BBHHHBBH4s4s', ip4_header)
+\end{lstlisting}
+
+\quad A \emph{String} \texttt{!BBHHHBBH4s4s} referencia os seguintes valores neste universo de 20 \emph{bytes}:
+
+\begin{itemize}
+    \item \texttt{!}: ordem de \emph{bytes} de rede;
+    \item \texttt{B}: 1 \emph{byte} para Versão + IHL (\emph{Internet Header Length});
+    \item \texttt{B}: 1 \emph{byte} para \emph{Type of Service} (ToS);
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Total Length} do pacote;
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Identification};
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Flags} + \emph{Fragment Offset};
+    \item \texttt{B}: 1 \emph{byte} para \emph{Time To Live} (TTL);
+    \item \texttt{B}: 1 \emph{byte} para \emph{Protocol} (o identificador do protocolo de camada superior);
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Header Checksum};
+    \item \texttt{4s}: 4 \emph{bytes} para o IP de origem;
+    \item \texttt{4s}: 4 \emph{bytes} para o IP de destino.
+\end{itemize}
+
+\subsection{IPv6}
+Ainda no contexto da camada de Rede, extraímos e processamos o cabeçalho IPv6, correspondido entre os \emph{bytes} 14 e 54 do pacote. O cabeçalho IPv6 possui sempre 40 \emph{bytes} e também começa logo após o cabeçalho \emph{Ethernet}.
+
+\begin{lstlisting}[style=vscode]
+ip6_header = pkt_data[14:54]
+ipv6 = struct.unpack('!IHBB16s16s', ip6_header)
+\end{lstlisting}
+
+\quad A \emph{String} \texttt{!IHBB16s16s} referencia os seguintes valores neste universo de 40 \emph{bytes}:
+
+\begin{itemize}
+    \item \texttt{!}: ordem de \emph{bytes} de rede;
+    \item \texttt{I}: 4 \emph{bytes} para Versão, \emph{Traffic Class} e \emph{Flow Label};
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Payload Length};
+    \item \texttt{B}: 1 \emph{byte} para \emph{Next Header} (identificador do protocolo de transporte);
+    \item \texttt{B}: 1 \emph{byte} para \emph{Hop Limit} (TTL do IPv6);
+    \item \texttt{16s}: 16 \emph{bytes} para o IP de origem;
+    \item \texttt{16s}: 16 \emph{bytes} para o IP de destino.
+\end{itemize}
+
+\subsection{TCP e UDP}
+Já no contexto da camada de Transporte, extraímos e processamos os cabeçalhos dos protocolos TCP e UDP. No caso do \emph{Transmission Control Protocol}, o cabeçalho é reconhecido entre os \emph{bytes} 34 e 54 do pacote. O cabeçalho TCP padrão possui 20 \emph{bytes} e inicia logo após o cabeçalho IPv4 (que começa no \emph{byte} 14).
+
+\quad Por outro lado, no caso do \emph{User Datagram Protocol}, o cabeçalho é reconhecido entre os \emph{bytes} 34 e 42 do pacote. O cabeçalho UDP tem 8 \emph{bytes} e, neste caso, começa após o cabeçalho IPv6.
+
+\begin{lstlisting}[style=vscode]
+transport_header = None
+    if ipv4[6] == 6:
+        transport_header = pkt_data[34:54]
+        tcp = struct.unpack('!HHLLBBHHH', transport_header)
+        ...
+    elif ipv6[2] == 17:
+        transport_header = pkt_data[34:42]
+        udp = struct.unpack('!HHHH', transport_header)
+\end{lstlisting}
+
+\quad No caso do TCP, a \emph{String} \texttt{!HHLLBBHHH} referencia os seguintes valores neste universo de 20 \emph{bytes}:
+
+\begin{itemize}
+    \item \texttt{!}: ordem de \emph{bytes} de rede;
+    \item \texttt{H}: 2 \emph{bytes} para Porta de Origem;
+    \item \texttt{H}: 2 \emph{bytes} para Porta de Destino;
+    \item \texttt{L}: 4 \emph{bytes} para Número de Sequência;
+    \item \texttt{L}: 4 \emph{bytes} para Número de \emph{Acknowledgment};
+    \item \texttt{B}: 1 \emph{byte} para \emph{Data Offset} + \emph{Reserved} + \emph{Flags};
+    \item \texttt{B}: 1 \emph{byte} para \emph{Window Size};
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Checksum};
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Urgent Pointer};
+    \item \texttt{H}: 2 \emph{bytes} para Opções (se houver).
+\end{itemize}
+
+\quad No caso do UDP, a \emph{String} \texttt{!HHHH} referencia os seguintes valores neste universo de 8 \emph{bytes}:
+
+\begin{itemize}
+    \item \texttt{!}: ordem de bytes de rede;
+    \item \texttt{H}: 2 \emph{bytes} para Porta de Origem;
+    \item \texttt{H}: 2 \emph{bytes} para Porta de Destino;
+    \item \texttt{H}: 2 \emph{bytes} para Comprimento;
+    \item \texttt{H}: 2 \emph{bytes} para \emph{Checksum}.
+\end{itemize}
+
+\section{Interface de usuário}
+A interação do usuário com o sistema de captura de tráfego de rede desenvolvido é baseada em dois comandos: \texttt{cat} e \texttt{stop}. Ao executar o algoritmo, uma lista de interfaces de rede disponíveis é exibida, permitindo ao usuário escolher em qual das interfaces em sua estação a captura deve ser efetivamente realizada.
+
+\begin{lstlisting}[style=vscode]
+def list_interfaces():
+    with WinPcapDevices() as devices:
+        device_list = []
+        for i, device in enumerate(devices):
+            desc = device.description.decode() if isinstance(device.description, bytes) else device.description
+            desc = desc if desc else "No description available"
+            print(f"{i}: {desc}")
+            device_list.append(desc)
+
+        idx = int(input("\nType the interface number to start capturing: "))
+        return device_list[idx]
+...
+
+def capture_packets(interface):
+    try:
+        WinPcapUtils.capture_on(interface, packet_callback)
+    except Exception as e:
+        print(f"Capture error: {e}")
+\end{lstlisting}
+
+\quad Escolhida a interface, a captura será iniciada após o comando \texttt{cat}. Nesse momento, os arquivos \texttt{.xlsx} são criados (caso ainda não existam) e são alimentados com os dados já mencionados a respeito de cada um dos pacotes que o sistema é capaz de identificar e monitorar.
+
+\section{Registro dos arquivos}
+A escolha do pacote \texttt{openpyxl} para a criação de arquivos no formato \texttt{.xlsx} se deve à sua capacidade de criar, ler e modificar planilhas de maneira eficiente. Assim, conforme a captura é realizada em tempo real, as informações pré-determinadas a respeito de cada pacote são registradas e organizadas nas tabelas, possibilitando a posterior análise dos resultados em ferramentas como o \emph{Microsoft Excel}.
+
+\begin{lstlisting}[style=vscode]
+excel_lock = threading.Lock()
+
+def write_excel_log(filename, header, row):
+    with excel_lock:
+        file_exists = os.path.exists(filename) and os.path.getsize(filename) > 0
+        try:
+            if file_exists:
+                wb = load_workbook(filename)
+                ws = wb.active
+            else:
+                wb = Workbook()
+                ws = wb.active
+                ws.append(header)
+            ws.append(row)
+            wb.save(filename)
+        except Exception as e:
+            print(f"Error on file '{filename}': {e}")
+\end{lstlisting}
+
+\section{Estatísticas de captura}
+Além do comando \texttt{cat}, que inicia a captura, o usuário pode interrompê-la a qualquer momento utilizando o comando \texttt{stop}. No momento em que a captura é interrompida, são impressas na tela as estatísticas relacionadas a cada pacote capturado, em especial a quantidade de quadros e pacotes identificados durante o monitoramento do tráfego de rede na interface indicada.
+
+\quad Abaixo, você poderá ver um exemplo dos resultados impressos no terminal após o encerramento da captura por parte do usuário:
+
+\begin{terminal}
+Capture stopped!
+==================================================
+Summary:
+Ethernet frames: 119
+IPv4 packets:    119
+IPv6 packets:    119
+TCP segments:    114
+UDP datagrams:   2
+==================================================
+\end{terminal}
+
+\end{document}

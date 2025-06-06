@@ -7,18 +7,23 @@ import time
 from winpcapy import WinPcapUtils, WinPcapDevices
 from openpyxl import Workbook, load_workbook
 
+excel_lock = threading.Lock()
+
 def write_excel_log(filename, header, row):
-    # Criação, construção e registro dos arquivos .xlsx
-    file_exists = os.path.exists(filename) and os.path.getsize(filename) > 0
-    if file_exists:
-        wb = load_workbook(filename)
-        ws = wb.active
-    else:
-        wb = Workbook()
-        ws = wb.active
-        ws.append(header)
-    ws.append(row)
-    wb.save(filename)
+    with excel_lock:
+        file_exists = os.path.exists(filename) and os.path.getsize(filename) > 0
+        try:
+            if file_exists:
+                wb = load_workbook(filename)
+                ws = wb.active
+            else:
+                wb = Workbook()
+                ws = wb.active
+                ws.append(header)
+            ws.append(row)
+            wb.save(filename)
+        except Exception as e:
+            print(f"Error on file '{filename}': {e}")
 
 def mac_addr(bytes_addr):
     # Converte endereço MAC em bytes para String legível
@@ -122,7 +127,7 @@ def packet_callback(win_pcap, param, header, pkt_data):
             "layer3.xlsx",
             ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_ip, dst_ip, ipv6[2], header.contents.len]
-    )
+        )
 
     # Extrai e processa o cabeçalho de transporte do pacote capturado
     transport_header = None
