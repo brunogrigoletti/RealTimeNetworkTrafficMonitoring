@@ -4,10 +4,13 @@ import sys
 import threading
 import os
 import time
+import signal
 from winpcapy import WinPcapUtils, WinPcapDevices
 from openpyxl import Workbook, load_workbook
 
 excel_lock = threading.Lock()
+
+is_shutting_down = False
 
 LAYER2_LOG = "layer2.xlsx"
 LAYER3_LOG = "layer3.xlsx"
@@ -333,47 +336,76 @@ def loading_spinner(stop_event):
         sys.stdout.flush()
         idx += 1
         time.sleep(0.1)
+    
     sys.stdout.write('\r' + ' ' * 40 + '\r\n')
     sys.stdout.flush()
 
+def graceful_shutdown(signum=None, frame=None):
+    global is_shutting_down
+    
+    if is_shutting_down:
+        return
+    
+    is_shutting_down = True
+    print("\n\nCapture stopped...")
+    
+    stop_event.set()
+    
+    time.sleep(0.5)
+    
+    if eth_count > 0:
+        print("=" * 50)
+        print(f"Summary:")
+        print(f"Ethernet frames: {eth_count}")
+        print(f"IPv4 packets:    {ip4_count}")
+        print(f"IPv6 packets:    {ip6_count}")
+        print(f"ARP packets:     {arp_count}")
+        print(f"TCP segments:    {tcp_count}")
+        print(f"UDP datagrams:   {udp_count}")
+        print("=" * 50)
+    
+    print("Shutdown complete. Excel files saved safely.")
+    sys.exit(0)
+
 def main():
-    delete_existing_logs()
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGTERM, graceful_shutdown)
 
-    interface = list_interfaces()
-    print(f"\nSelected interface: '{interface}'\n")
-    capture_thread = None
-    spinner_thread = None
+    try:
+        delete_existing_logs()
 
-    while True:
-        cmd = input("Type 'cat' to start capturing or 'stop' to stop: ").strip().lower()
-        if cmd == "cat":
-            if capture_thread and capture_thread.is_alive():
-                print("Capture is already running!")
+        interface = list_interfaces()
+        print(f"\nSelected interface: '{interface}'\n")
+        capture_thread = None
+        spinner_thread = None
+
+        while True:
+            cmd = input("Type 'cat' to start capturing or 'stop' to stop: ").strip().lower()
+            if cmd == "cat":
+                if capture_thread and capture_thread.is_alive():
+                    print("Capture is already running!")
+                else:
+                    stop_event.clear()
+                    capture_thread = threading.Thread(target=capture_packets, args=(interface,), daemon=True)
+                    spinner_thread = threading.Thread(target=loading_spinner, args=(stop_event,), daemon=True)
+                    capture_thread.start()
+                    spinner_thread.start()  
+            elif cmd == "stop":
+                if capture_thread and capture_thread.is_alive():
+                    stop_event.set()
+
+                    if spinner_thread and spinner_thread.is_alive():
+                        spinner_thread.join(timeout=1.0)
+                    
+                    graceful_shutdown()
+                else:
+                    print("No capture is running!")
             else:
-                stop_event.clear()
-                capture_thread = threading.Thread(target=capture_packets, args=(interface,), daemon=True)
-                spinner_thread = threading.Thread(target=loading_spinner, args=(stop_event,), daemon=True)
-                capture_thread.start()
-                spinner_thread.start()  
-        elif cmd == "stop":
-            if capture_thread and capture_thread.is_alive():
-                stop_event.set()
-                spinner_thread.join()
-                print("Capture stopped!")
-                print("=" * 50)
-                print(f"Summary:")
-                print(f"Ethernet frames: {eth_count}")
-                print(f"IPv4 packets:    {ip4_count}")
-                print(f"IPv6 packets:    {ip6_count}")
-                print(f"ARP packets:     {arp_count}")
-                print(f"TCP segments:    {tcp_count}")
-                print(f"UDP datagrams:   {udp_count}")
-                print("=" * 50)
-                break
-            else:
-                print("No capture is running!")
-        else:
-            print("Unknown command!")
+                print("Unknown command!")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        graceful_shutdown()
 
 if __name__ == "__main__":
     main()
