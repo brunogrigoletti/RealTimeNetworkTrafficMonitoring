@@ -48,11 +48,12 @@ def mac_addr(bytes_addr):
 eth_count = 0
 ip4_count = 0
 ip6_count = 0
+arp_count = 0
 tcp_count = 0
 udp_count = 0
 
 def packet_callback(win_pcap, param, header, pkt_data):
-    global eth_count, ip4_count, ip6_count, tcp_count, udp_count
+    global eth_count, ip4_count, ip6_count, arp_count, tcp_count, udp_count
 
     # Obtém o timestamp do header
     ts_sec = header.contents.ts.tv_sec
@@ -107,6 +108,9 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # '4s': 4 bytes para o IP de origem
     # '4s': 4 bytes para o IP de destino
     ipv4 = struct.unpack('!BBHHHBBH4s4s', ip4_header)
+
+    src_ip4 = '.'.join(map(str, ipv4[8]))
+    dst_ip4 = '.'.join(map(str, ipv4[9]))
  
     # Extrai e processa o cabeçalho IPv6 do pacote capturado
     ip6_header = pkt_data[14:54]
@@ -123,19 +127,41 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # '16s': 16 bytes para o IP de destino
     ipv6 = struct.unpack('!IHBB16s16s', ip6_header)
 
-    src_ip = ':'.join(f"{ipv6[4][i]<<8 | ipv6[4][i+1]:x}" for i in range(0,16,2))
-    dst_ip = ':'.join(f"{ipv6[5][i]<<8 | ipv6[5][i+1]:x}" for i in range(0,16,2))    
+    src_ip6 = ':'.join(f"{ipv6[4][i]<<8 | ipv6[4][i+1]:x}" for i in range(0,16,2))
+    dst_ip6 = ':'.join(f"{ipv6[5][i]<<8 | ipv6[5][i+1]:x}" for i in range(0,16,2))
+
+    # Extrai e processa o cabeçalho ARP do pacote capturado
+    arp_header = pkt_data[14:42]
+    if len(arp_header) < 28:
+        return
+    
+    # Desempacota o cabeçalho ARP
+    # '!': ordem de bytes network (big-endian)
+    # 'H': 2 bytes para Hardware Type
+    # 'H': 2 bytes para Protocol Type
+    # 'B': 1 byte para Hardware Size
+    # 'B': 1 byte para Protocol Size
+    # 'H': 2 bytes para Opcode (Operação ARP)
+    # '6s': 6 bytes para o MAC de Origem
+    # '4s': 4 bytes para o IP de Origem (IPv4)
+    # '6s': 6 bytes para o MAC de Destino
+    # '4s': 4 bytes para o IP de Destino (IPv4)
+    arp = struct.unpack('!HHBBH6s4s6s4s', arp_header)
+
+    src_arp = '.'.join(map(str, arp[6]))
+    dst_arp = '.'.join(map(str, arp[8]))
 
     # Imprime o cabeçalho IP e escreve no log do Excel
-    # print_ipv4_header(timestamp, ipv4, header.contents.len, ip4_count)
-    # print_ipv6_header(timestamp, src_ip, dst_ip, ipv6, header.contents.len, ip6_count)
+    # print_ipv4_header(timestamp, src_ip4, dst_ip4, ipv4, header.contents.len, ip4_count)
+    # print_ipv6_header(timestamp, src_ip6, dst_ip6, ipv6, header.contents.len, ip6_count)
+    # print_arp_header(timestamp, src_arp, dst_arp, arp, header.contents.len, arp_count)
     if proto_name == "IPv4":
         ip4_count += 1
 
         write_excel_log(
             LAYER3_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
-            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, '.'.join(map(str, ipv4[8])), '.'.join(map(str, ipv4[9])), ipv4[6], header.contents.len]
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_ip4, dst_ip4, ipv4[6], header.contents.len]
         )
     elif proto_name == "IPv6":
         ip6_count += 1
@@ -143,7 +169,15 @@ def packet_callback(win_pcap, param, header, pkt_data):
         write_excel_log(
             LAYER3_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
-            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_ip, dst_ip, ipv6[2], header.contents.len]
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_ip6, dst_ip6, ipv6[2], header.contents.len]
+        )
+    elif proto_name == "ARP":
+        arp_count += 1
+
+        write_excel_log(
+            LAYER3_LOG,
+            ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_arp, dst_arp, arp[4], header.contents.len]
         )
 
     # Extrai e processa o cabeçalho de transporte do pacote capturado
@@ -179,16 +213,16 @@ def packet_callback(win_pcap, param, header, pkt_data):
 
     if transport_header and ipv4[6] == 6:
         proto = 'TCP'
-        src_ip_str = '.'.join(map(str, ipv4[8]))
+        src_ip_str = src_ip4
         src_port = tcp[0]
-        dst_ip_str = '.'.join(map(str, ipv4[9]))
+        dst_ip_str = dst_ip4
         dst_port = tcp[1]
         pkt_count = tcp_count
     elif transport_header and ipv6[2] == 17:
         proto = 'UDP'
-        src_ip_str = src_ip
+        src_ip_str = src_ip6
         src_port = udp[0]
-        dst_ip_str = dst_ip
+        dst_ip_str = dst_ip6
         dst_port = udp[1]
         pkt_count = udp_count
     else:
@@ -228,23 +262,32 @@ def print_ethernet_header(timestamp, eth, proto_name, header_len, eth_count):
     print(f"  Length: {header_len} bytes")
     print(f"  Packet Count: {eth_count}")
 
-def print_ipv4_header(timestamp, ipv4, header_len, ip4_count):
+def print_ipv4_header(timestamp, src_ip4, dst_ip4, ipv4, header_len, ip4_count):
     print("\nIPv4 Header:")
     print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
-    print(f"  Source IP: {'.'.join(map(str, ipv4[8]))}")
-    print(f"  Destination IP: {'.'.join(map(str, ipv4[9]))}")
+    print(f"  Source IP: {src_ip4}")
+    print(f"  Destination IP: {dst_ip4}")
     print(f"  Protocol ID: {ipv4[6]}")
     print(f"  Length: {header_len} bytes")
     print(f"  Packet Count: {ip4_count}")
 
-def print_ipv6_header(timestamp, src_ip, dst_ip, ipv6, header_len, ip6_count):
+def print_ipv6_header(timestamp, src_ip6, dst_ip6, ipv6, header_len, ip6_count):
     print("\nIPv6 Header:")
     print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
-    print(f"  Source IP: {src_ip}")
-    print(f"  Destination IP: {dst_ip}")
+    print(f"  Source IP: {src_ip6}")
+    print(f"  Destination IP: {dst_ip6}")
     print(f"  Protocol ID: {ipv6[2]}")
     print(f"  Length: {header_len} bytes")
     print(f"  Packet Count: {ip6_count}")
+
+def print_arp_header(timestamp, src_arp, dst_arp, arp, header_len, arp_count):
+    print("\nARP Header:")
+    print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
+    print(f"  Source IP: {src_arp}")
+    print(f"  Destination IP: {dst_arp}")
+    print(f"  Protocol ID: {arp[4]}")
+    print(f"  Length: {header_len} bytes")
+    print(f"  Packet Count: {arp_count}")
 
 def print_transport_header(timestamp, proto, src_ip, src_port, dst_ip, dst_port, header_len, count):
     print("\nTransport Header:")
@@ -322,6 +365,7 @@ def main():
                 print(f"Ethernet frames: {eth_count}")
                 print(f"IPv4 packets:    {ip4_count}")
                 print(f"IPv6 packets:    {ip6_count}")
+                print(f"ARP packets:     {arp_count}")
                 print(f"TCP segments:    {tcp_count}")
                 print(f"UDP datagrams:   {udp_count}")
                 print("=" * 50)
