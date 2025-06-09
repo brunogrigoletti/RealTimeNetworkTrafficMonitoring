@@ -9,6 +9,21 @@ from openpyxl import Workbook, load_workbook
 
 excel_lock = threading.Lock()
 
+LAYER2_LOG = "layer2.xlsx"
+LAYER3_LOG = "layer3.xlsx"
+LAYER4_LOG = "layer4.xlsx"
+
+def delete_existing_logs():
+    log_files = [LAYER2_LOG, LAYER3_LOG, LAYER4_LOG]
+    print("Checking for existing log files...")
+    for file in log_files:
+        try:
+            if os.path.exists(file):
+                os.remove(file)
+                print(f"Deleted existing log file: {file}")
+        except Exception as e:
+            print(f"Error deleting {file}: {e}")
+
 def write_excel_log(filename, header, row):
     with excel_lock:
         file_exists = os.path.exists(filename) and os.path.getsize(filename) > 0
@@ -69,7 +84,7 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # Imprime o cabeçalho Ethernet e escreve no log do Excel
     # print_ethernet_header(timestamp, eth, proto_name, header.contents.len, eth_count)
     write_excel_log(
-        "layer2.xlsx",
+        LAYER2_LOG,
         ['Timestamp', 'Source MAC', 'Destination MAC', 'Protocol', 'Protocol Name', 'Length'],
         [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), mac_addr(eth[1]), mac_addr(eth[0]), f"{eth[2]:#06x}", proto_name, header.contents.len]
     )
@@ -92,7 +107,6 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # '4s': 4 bytes para o IP de origem
     # '4s': 4 bytes para o IP de destino
     ipv4 = struct.unpack('!BBHHHBBH4s4s', ip4_header)
-    ip4_count += 1
  
     # Extrai e processa o cabeçalho IPv6 do pacote capturado
     ip6_header = pkt_data[14:54]
@@ -108,7 +122,6 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # '16s': 16 bytes para o IP de origem
     # '16s': 16 bytes para o IP de destino
     ipv6 = struct.unpack('!IHBB16s16s', ip6_header)
-    ip6_count += 1
 
     src_ip = ':'.join(f"{ipv6[4][i]<<8 | ipv6[4][i+1]:x}" for i in range(0,16,2))
     dst_ip = ':'.join(f"{ipv6[5][i]<<8 | ipv6[5][i+1]:x}" for i in range(0,16,2))    
@@ -117,14 +130,18 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # print_ipv4_header(timestamp, ipv4, header.contents.len, ip4_count)
     # print_ipv6_header(timestamp, src_ip, dst_ip, ipv6, header.contents.len, ip6_count)
     if proto_name == "IPv4":
+        ip4_count += 1
+
         write_excel_log(
-            "layer3.xlsx",
+            LAYER3_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, '.'.join(map(str, ipv4[8])), '.'.join(map(str, ipv4[9])), ipv4[6], header.contents.len]
         )
     elif proto_name == "IPv6":
+        ip6_count += 1
+
         write_excel_log(
-            "layer3.xlsx",
+            LAYER3_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Destination IP', 'Protocol ID', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto_name, src_ip, dst_ip, ipv6[2], header.contents.len]
         )
@@ -147,7 +164,7 @@ def packet_callback(win_pcap, param, header, pkt_data):
         # 'H': 2 bytes para Urgent Pointer
         # 'H': 2 bytes para Opções (se houver)
         tcp = struct.unpack('!HHLLBBHHH', transport_header)
-        tcp_count += 1
+        
     # UDP
     elif ipv6[2] == 17:
         transport_header = pkt_data[34:42]
@@ -159,7 +176,6 @@ def packet_callback(win_pcap, param, header, pkt_data):
         # 'H': 2 bytes para Comprimento
         # 'H': 2 bytes para Checksum
         udp = struct.unpack('!HHHH', transport_header) 
-        udp_count += 1
 
     if transport_header and ipv4[6] == 6:
         proto = 'TCP'
@@ -186,14 +202,18 @@ def packet_callback(win_pcap, param, header, pkt_data):
     # Imprime o cabeçalho UDP/TCP e escreve no log do Excel
     # print_transport_header(timestamp,proto,src_ip_str,src_port,dst_ip_str,dst_port,header.contents.len,pkt_count)
     if transport_header and proto == 'TCP':
+        tcp_count += 1
+        
         write_excel_log(
-            "layer4.xlsx",
+            LAYER4_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
         )
     elif transport_header and proto == 'UDP':
+        udp_count += 1
+
         write_excel_log(
-            "layer4.xlsx",
+            LAYER4_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
         )
@@ -240,6 +260,7 @@ def print_transport_header(timestamp, proto, src_ip, src_port, dst_ip, dst_port,
 
 def list_interfaces():
     # Lista todas as interfaces disponíveis para captura
+    print("\nAvailable interfaces:")
     with WinPcapDevices() as devices:
         device_list = []
         for i, device in enumerate(devices):
@@ -273,6 +294,8 @@ def loading_spinner(stop_event):
     sys.stdout.flush()
 
 def main():
+    delete_existing_logs()
+
     interface = list_interfaces()
     print(f"\nSelected interface: '{interface}'\n")
     capture_thread = None
