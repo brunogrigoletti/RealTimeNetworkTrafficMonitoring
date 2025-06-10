@@ -54,9 +54,11 @@ ip6_count = 0
 arp_count = 0
 tcp_count = 0
 udp_count = 0
+icmp_count = 0
+icmpv6_count = 0
 
 def packet_callback(win_pcap, param, header, pkt_data):
-    global eth_count, ip4_count, ip6_count, arp_count, tcp_count, udp_count
+    global eth_count, ip4_count, ip6_count, arp_count, tcp_count, udp_count, icmp_count, icmpv6_count
 
     # Obtém o timestamp do header
     ts_sec = header.contents.ts.tv_sec
@@ -212,7 +214,32 @@ def packet_callback(win_pcap, param, header, pkt_data):
         # 'H': 2 bytes para Porta de Destino
         # 'H': 2 bytes para Comprimento
         # 'H': 2 bytes para Checksum
-        udp = struct.unpack('!HHHH', transport_header) 
+        udp = struct.unpack('!HHHH', transport_header)
+
+    # ICMP
+    elif ipv4[6] == 1:
+        transport_header = pkt_data[34:42]
+
+        # Desempacota o cabeçalho de transporte ICMP
+        # '!': ordem de bytes network (big-endian)
+        # 'B': 1 byte para Tipo
+        # 'B': 1 byte para Código
+        # 'H': 2 bytes para Checksum
+        # 'H': 2 bytes para Identificador
+        # 'H': 2 bytes para Sequência
+        icmp = struct.unpack('!BBHHH', transport_header)
+
+    elif ipv6[2] == 58:
+        transport_header = pkt_data[54:62]
+
+        # Desempacota o cabeçalho de transporte ICMPv6
+        # '!': ordem de bytes network (big-endian)
+        # 'B': 1 byte para Tipo
+        # 'B': 1 byte para Código
+        # 'H': 2 bytes para Checksum
+        # 'H': 2 bytes para Identificador
+        # 'H': 2 bytes para Sequência
+        icmpv6 = struct.unpack('!BBHHH', transport_header)
 
     if transport_header and ipv4[6] == 6:
         proto = 'TCP'
@@ -228,6 +255,20 @@ def packet_callback(win_pcap, param, header, pkt_data):
         dst_ip_str = dst_ip6
         dst_port = udp[1]
         pkt_count = udp_count
+    elif transport_header and ipv4[6] == 1:
+        proto = 'ICMP'
+        src_ip_str = src_ip4
+        src_port = icmp[0]
+        dst_ip_str = dst_ip4
+        dst_port = icmp[1]
+        pkt_count = 'N/A'
+    elif transport_header and ipv6[2] == 58:
+        proto = 'ICMPv6'
+        src_ip_str = src_ip6
+        src_port = icmpv6[0]
+        dst_ip_str = dst_ip6
+        dst_port = icmpv6[1]
+        pkt_count = 'N/A'
     else:
         proto = 'Unknown'
         src_ip_str = 'N/A'
@@ -236,11 +277,11 @@ def packet_callback(win_pcap, param, header, pkt_data):
         dst_port = 'N/A'
         pkt_count = 'N/A'
     
-    # Imprime o cabeçalho UDP/TCP e escreve no log do Excel
+    # Imprime o cabeçalho de Transporte e escreve no log do Excel
     # print_transport_header(timestamp,proto,src_ip_str,src_port,dst_ip_str,dst_port,header.contents.len,pkt_count)
     if transport_header and proto == 'TCP':
         tcp_count += 1
-        
+
         write_excel_log(
             LAYER4_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
@@ -253,6 +294,22 @@ def packet_callback(win_pcap, param, header, pkt_data):
             LAYER4_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
             [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
+        )
+    elif transport_header and proto == 'ICMP':
+        icmp_count += 1
+
+        write_excel_log(
+            LAYER4_LOG,
+            ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, '', dst_ip_str, '', header.contents.len]
+        )
+    elif transport_header and proto == 'ICMPv6':
+        icmpv6_count += 1
+
+        write_excel_log(
+            LAYER4_LOG,
+            ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, '', dst_ip_str, '', header.contents.len]
         )
     
 def print_ethernet_header(timestamp, eth, proto_name, header_len, eth_count):
@@ -347,7 +404,7 @@ def graceful_shutdown(signum=None, frame=None):
         return
     
     is_shutting_down = True
-    print("\n\nCapture stopped...")
+    print("Capture stopped...")
     
     stop_event.set()
     
@@ -362,6 +419,8 @@ def graceful_shutdown(signum=None, frame=None):
         print(f"ARP packets:     {arp_count}")
         print(f"TCP segments:    {tcp_count}")
         print(f"UDP datagrams:   {udp_count}")
+        print(f"ICMP messages:   {icmp_count}")
+        print(f"ICMPv6 messages: {icmpv6_count}")
         print("=" * 50)
     
     print("Shutdown complete. Excel files saved safely.")

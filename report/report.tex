@@ -75,7 +75,7 @@
 \section{Introdução}
 O presente relatório detalha a implementação de uma ferramenta de monitoramento de tráfego de rede em tempo real. O sistema desenvolvido é capaz de capturar, interpretar e classificar pacotes de rede, além de fornecer uma interface de usuário simples para que seja possível visualizar as estatísticas do tráfego. Além disso, cada captura incrementa arquivos \texttt{.xlsx}, os quais mantêm registrado um histórico de cada tipo de pacote recebido.
 
-\quad Os logs da camada de Enlace (\texttt{layer2.xlsx}) registram a data e a hora em que o quadro foi capturado; o endereço MAC de origem e o endereço MAC de destino; o protocolo que o \emph{frame} carrega no formato hexadecimal; e, por fim, o tamanho total do quadro em \emph{bytes}. No caso da camada de Rede (\texttt{layer3.xlsx}), registra-se a data e a hora em que o pacote foi capturado; o nome do protocolo (IPv4 ou IPv6); o endereço IP de origem e o endereço IP de destino; o identificador do protocolo carregado no pacote; e, finalmente, o tamanho total do pacote em \emph{bytes}. Ainda, no caso da camada de Transporte (\texttt{layer4.xlsx}), são registrados a data e a hora em que o pacote foi capturado; o nome do protocolo (TCP ou UDP); o endereço IP de origem; a porta de origem; o endereço IP de destino; a porta de destino; e, enfim, o tamanho total do pacote em \emph{bytes}.
+\quad Os logs da camada de Enlace (\texttt{layer2.xlsx}) registram a data e a hora em que o quadro foi capturado; o endereço MAC de origem e o endereço MAC de destino; o protocolo que o \emph{frame} carrega no formato hexadecimal; e, por fim, o tamanho total do quadro em \emph{bytes}. No caso da camada de Rede (\texttt{layer3.xlsx}), registra-se a data e a hora em que o pacote foi capturado; o nome do protocolo (IPv4, IPv6 ou ARP); o endereço IP de origem e o endereço IP de destino; o identificador do protocolo carregado no pacote; e, finalmente, o tamanho total do pacote em \emph{bytes}. Ainda, no caso da camada de Transporte (\texttt{layer4.xlsx}), são registrados a data e a hora em que o pacote foi capturado; o nome do protocolo (TCP, UDP, ICMP ou ICMPv6); o endereço IP de origem; a porta de origem; o endereço IP de destino; a porta de destino; e, enfim, o tamanho total do pacote em \emph{bytes}.
 
 \quad Finalmente, a escolha pelo uso do pacote \texttt{winpcapy} neste projeto se deve à sua capacidade de fornecer acesso direto e eficiente à captura de pacotes de rede em sistemas \emph{Windows}, aproveitando a biblioteca \emph{WinPcap}. O \texttt{winpcapy} permite a interceptação de pacotes em baixo nível, possibilitando a análise detalhada dos protocolos das camadas 2, 3 e 4 da pilha TCP/IP, o que é fundamental para a nossa aplicação de monitoramento de tráfego de rede em tempo real.
 
@@ -143,6 +143,29 @@ ipv6 = struct.unpack('!IHBB16s16s', ip6_header)
     \item \texttt{16s}: 16 \emph{bytes} para o IP de destino.
 \end{itemize}
 
+\subsection{ARP}
+Para a identificação de pacotes ARP, extraímos e processamos o cabeçalho correspondente entre os \emph{bytes} 14 e 42 do pacote. O cabeçalho ARP possui 28 \emph{bytes} e também começa logo após o cabeçalho \emph{Ethernet}.
+
+\begin{lstlisting}[style=vscode]
+arp_header = pkt_data[14:42]
+arp = struct.unpack('!HHBBH6s4s6s4s', arp_header)
+\end{lstlisting}
+
+\quad A \emph{String} \texttt{!HHBBH6s4s6s4s} referencia os seguintes valores neste universo de 28 \emph{bytes}:
+
+\begin{itemize}
+    \item \texttt{!}: ordem de \emph{bytes} de rede;
+    \item \texttt{H}: 2 \emph{bytes} para o \emph{Hardware Type};
+    \item \texttt{H}: 2 \emph{bytes} para o \emph{Protocol Type};
+    \item \texttt{B}: 1 \emph{byte} para o \emph{Hardware Size};
+    \item \texttt{B}: 1 \emph{byte} para o \emph{Protocol Size};
+    \item \texttt{H}: 2 \emph{bytes} para o \emph{Opcode};
+    \item \texttt{6s}: 6 \emph{bytes} para o endereço MAC de origem;
+    \item \texttt{4s}: 4 \emph{bytes} para o endereço IP de origem;
+    \item \texttt{6s}: 6 \emph{bytes} para o endereço MAC de destino;
+    \item \texttt{4s}: 4 \emph{bytes} para o endereço IP de destino.
+\end{itemize}
+
 \subsection{TCP e UDP}
 Já no contexto da camada de Transporte, extraímos e processamos os cabeçalhos dos protocolos TCP e UDP. No caso do \emph{Transmission Control Protocol}, o cabeçalho é reconhecido entre os \emph{bytes} 34 e 54 do pacote. O cabeçalho TCP padrão possui 20 \emph{bytes} e inicia logo após o cabeçalho IPv4 (que começa no \emph{byte} 14).
 
@@ -177,11 +200,38 @@ transport_header = None
 \quad No caso do UDP, a \emph{String} \texttt{!HHHH} referencia os seguintes valores neste universo de 8 \emph{bytes}:
 
 \begin{itemize}
-    \item \texttt{!}: ordem de bytes de rede;
+    \item \texttt{!}: ordem de \emph{bytes} de rede;
     \item \texttt{H}: 2 \emph{bytes} para Porta de Origem;
     \item \texttt{H}: 2 \emph{bytes} para Porta de Destino;
     \item \texttt{H}: 2 \emph{bytes} para Comprimento;
     \item \texttt{H}: 2 \emph{bytes} para \emph{Checksum}.
+\end{itemize}
+
+\subsection{ICMP e ICMPv6}
+Ainda na camada de Transporte, extraímos e processamos os cabeçalhos dos protocolos ICMP e ICMPv6. No caso do \emph{Internet Control Message Protocol}, o cabeçalho é reconhecido entre os \emph{bytes} 34 e 42 do pacote. O cabeçalho ICMP padrão possui 8 \emph{bytes} e inicia logo após o cabeçalho IPv4.
+
+\quad Por outro lado, no caso do \emph{Internet Control Message Protocol Version 6}, o cabeçalho é reconhecido entre os \emph{bytes} 54 e 62. O cabeçalho ICMPv6 padrão possui 8 \emph{bytes} e inicia logo após o cabeçalho IPv6.
+
+\begin{lstlisting}[style=vscode]
+...
+    elif ipv4[6] == 1:
+        transport_header = pkt_data[34:42]
+        icmp = struct.unpack('!BBHHH', transport_header)
+        ...
+    elif ipv6[2] == 58:
+        transport_header = pkt_data[54:62]
+        icmpv6 = struct.unpack('!BBHHH', transport_header)
+\end{lstlisting}
+
+\quad Em ambos os cenários, a \emph{String} \texttt{!BBHHH} referencia os seguintes valores neste universo de 8 \emph{bytes}:
+
+\begin{itemize}
+    \item \texttt{!}: ordem de \emph{bytes} de rede;
+    \item \texttt{B}: 1 \emph{byte} para o Tipo;
+    \item \texttt{B}: 1 \emph{byte} para o Código;
+    \item \texttt{H}: 2 \emph{bytes} para o \emph{Checksum};
+    \item \texttt{H}: 2 \emph{bytes} para o Identificador (usado em \emph{Echo Request}/\emph{Reply});
+    \item \texttt{H}: 2 \emph{bytes} para o Número de Sequência (também usado em \emph{Echo Request}/\emph{Reply}).
 \end{itemize}
 
 \section{Interface de usuário}
@@ -189,6 +239,7 @@ A interação do usuário com o sistema de captura de tráfego de rede desenvolv
 
 \begin{lstlisting}[style=vscode]
 def list_interfaces():
+    print("\nAvailable interfaces:")
     with WinPcapDevices() as devices:
         device_list = []
         for i, device in enumerate(devices):
@@ -199,7 +250,8 @@ def list_interfaces():
 
         idx = int(input("\nType the interface number to start capturing: "))
         return device_list[idx]
-...
+
+stop_event = threading.Event()
 
 def capture_packets(interface):
     try:
@@ -213,8 +265,27 @@ def capture_packets(interface):
 \section{Registro dos arquivos}
 A escolha do pacote \texttt{openpyxl} para a criação de arquivos no formato \texttt{.xlsx} se deve à sua capacidade de criar, ler e modificar planilhas de maneira eficiente. Assim, conforme a captura é realizada em tempo real, as informações pré-determinadas a respeito de cada pacote são registradas e organizadas nas tabelas, possibilitando a posterior análise dos resultados em ferramentas como o \emph{Microsoft Excel}.
 
+\quad O código realiza uma checagem prévia para identificar a existência de arquivos de log antigos antes de iniciar uma nova captura de pacotes. Nesse sentido, a função \texttt{delete\_existing\_logs()} verifica se cada arquivo esperado (para as camadas 2, 3 e 4 da pilha TCP/IP) está presente no diretório. Caso o arquivo exista, ele é removido de forma a garantir que os dados registrados em execuções anteriores não interfiram nos resultados da nova captura.
+
 \begin{lstlisting}[style=vscode]
 excel_lock = threading.Lock()
+
+is_shutting_down = False
+
+LAYER2_LOG = "layer2.xlsx"
+LAYER3_LOG = "layer3.xlsx"
+LAYER4_LOG = "layer4.xlsx"
+
+def delete_existing_logs():
+    log_files = [LAYER2_LOG, LAYER3_LOG, LAYER4_LOG]
+    print("Checking for existing log files...")
+    for file in log_files:
+        try:
+            if os.path.exists(file):
+                os.remove(file)
+                print(f"Deleted existing log file: {file}")
+        except Exception as e:
+            print(f"Error deleting {file}: {e}")
 
 def write_excel_log(filename, header, row):
     with excel_lock:
@@ -242,12 +313,16 @@ Além do comando \texttt{cat}, que inicia a captura, o usuário pode interrompê
 Capture stopped!
 ==================================================
 Summary:
-Ethernet frames: 119
-IPv4 packets:    119
-IPv6 packets:    119
-TCP segments:    114
+Ethernet frames: 203
+IPv4 packets:    196
+IPv6 packets:    2
+ARP packets:     1
+TCP segments:    174
 UDP datagrams:   2
+ICMP messages:   8
+ICMPv6 messages: 0
 ==================================================
+Shutdown complete. Excel files saved safely.
 \end{terminal}
 
 \end{document}
