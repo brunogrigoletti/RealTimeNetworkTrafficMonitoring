@@ -241,6 +241,18 @@ def packet_callback(win_pcap, param, header, pkt_data):
         # 'H': 2 bytes para Sequência
         icmpv6 = struct.unpack('!BBHHH', transport_header)
 
+    # Dicionário de portas conhecidas
+    PORT_NAMES = {
+        80: "HTTP",
+        443: "HTTPS",
+        53: "DNS",
+        22: "SSH",
+        25: "SMTP",
+        110: "POP3",
+        143: "IMAP",
+        21: "FTP",
+    }
+    
     if transport_header and ipv4[6] == 6:
         proto = 'TCP'
         src_ip_str = src_ip4
@@ -278,22 +290,24 @@ def packet_callback(win_pcap, param, header, pkt_data):
         pkt_count = 'N/A'
     
     # Imprime o cabeçalho de Transporte e escreve no log do Excel
-    # print_transport_header(timestamp,proto,src_ip_str,src_port,dst_ip_str,dst_port,header.contents.len,pkt_count)
+    # print_transport_header(timestamp,proto,src_ip_str,src_port,dst_ip_str,dst_port,header.contents.len,pkt_count, PORT_NAMES)
     if transport_header and proto == 'TCP':
         tcp_count += 1
-
+        src_port_str = f"{src_port} - {PORT_NAMES[src_port]}" if src_port in PORT_NAMES else str(src_port)
+        dst_port_str = f"{dst_port} - {PORT_NAMES[dst_port]}" if dst_port in PORT_NAMES else str(dst_port)
         write_excel_log(
             LAYER4_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
-            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port_str, dst_ip_str, dst_port_str, header.contents.len]
         )
     elif transport_header and proto == 'UDP':
         udp_count += 1
-
+        src_port_str = f"{src_port} - {PORT_NAMES[src_port]}" if src_port in PORT_NAMES else str(src_port)
+        dst_port_str = f"{dst_port} - {PORT_NAMES[dst_port]}" if dst_port in PORT_NAMES else str(dst_port)
         write_excel_log(
             LAYER4_LOG,
             ['Timestamp', 'Protocol', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Length'],
-            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port, dst_ip_str, dst_port, header.contents.len]
+            [timestamp.strftime('%d/%m/%Y %I:%M:%S %p'), proto, src_ip_str, src_port_str, dst_ip_str, dst_port_str, header.contents.len]
         )
     elif transport_header and proto == 'ICMP':
         icmp_count += 1
@@ -349,14 +363,16 @@ def print_arp_header(timestamp, src_arp, dst_arp, arp, header_len, arp_count):
     print(f"  Length: {header_len} bytes")
     print(f"  Packet Count: {arp_count}")
 
-def print_transport_header(timestamp, proto, src_ip, src_port, dst_ip, dst_port, header_len, count):
+def print_transport_header(timestamp, proto, src_ip, src_port, dst_ip, dst_port, header_len, count, PORT_NAMES):
+    src_port_str = f"{src_port} - {PORT_NAMES[src_port]}" if src_port in PORT_NAMES else str(src_port)
+    dst_port_str = f"{dst_port} - {PORT_NAMES[dst_port]}" if dst_port in PORT_NAMES else str(dst_port)
     print("\nTransport Header:")
     print(f"  Timestamp: {timestamp.strftime('%d/%m/%Y %I:%M:%S %p')}")
     print(f"  Protocol: {proto}")
     print(f"  Source IP: {src_ip}")
-    print(f"  Source Port: {src_port}")
+    print(f"  Source Port: {src_port_str}")
     print(f"  Destination IP: {dst_ip}")
-    print(f"  Destination Port: {dst_port}")
+    print(f"  Destination Port: {dst_port_str}")
     print(f"  Length: {header_len} bytes")
     print(f"  Packet Count: {count}")
     print("=" * 50)
